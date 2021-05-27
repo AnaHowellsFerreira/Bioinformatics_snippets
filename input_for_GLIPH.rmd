@@ -1,0 +1,176 @@
+Data wrangling:
+Code for preparing 10x single cell VDJ experiments and Adaptive Biotech files into the correct format 
+for analysis with [GLIPH](https://github.com/immunoengineer/gliph)
+
+
+
+Required Data Inputs for GLIPH according to documentation:
+
+
+The user must provide a table of TCR sequences. 
+
+  --tcr TCR_TABLE
+
+The format of the table is tab delimited (text format), expecting the following columns in this 
+order. Only TCRB is required for the primary component of the algorithm to function, 
+but patient identity is required for HLA prediction. 
+
+Example:
+```
+
+CDR3b       TRBV    TRBJ    CDR3a       TRAV        TRAJ    PatientCounts #(optional)
+```
+First we need to extract TCRB and TCRA information (if paired) from TCR data containing aa sequence and VJ genes
+```
+$ awk '{FS="," ; if($6=="TRB" &&  $13!="None") print $13"\t"$7"\t"$9}' all_contig_annotations.csv  > TRB_TCR.txt
+
+anaferreira@Anas-MacBook-Pro:~/Desktop/GLIPH
+$ head TRB_TCR.txt 
+CASSPLVEDTQYF   TRBV18  TRBJ2-3
+CASSGQGANTEAFF  TRBV2   TRBJ1-1
+CASGSEPGKTQYF   TRBV12-5    TRBJ2-5
+CASSNNRDDLGYTF  TRBV6-4 TRBJ1-2
+CASSQSGTATYNEQFF    TRBV4-1 TRBJ2-1
+CASESVTGELFF    TRBV19  TRBJ2-2
+CASSVEDGSTDTQYF TRBV9   TRBJ2-3
+CASSFGTMGYEQYF  TRBV12-4    TRBJ2-7
+CASSQAGANEQFF   TRBV3-1 TRBJ2-1
+CASSATGGSGGYTF  TRBV19  TRBJ1-2
+
+
+$ awk '{FS="," ; if($6=="TRA" &&  $13!="None") print $13"\t"$7"\t"$9}' all_contig_annotations.csv  > TRA_TCR
+
+anaferreira@Anas-MacBook-Pro:~/Desktop/GLIPH
+$ head TRA_TCR 
+CAVRQNNDMRF TRAV41  TRAJ43
+CAVFNQAGTALIF   TRAV20  TRAJ15
+CAVIGSGAGSYQLTF TRAV8-6 TRAJ28
+CAVARPYRGSGYALNF    TRAV8-3 TRAJ41
+CAVIPNNARLMF    TRAV8-6 TRAJ31
+CAANPNSGNTPLVF  TRAV13-1    TRAJ29
+CATDWYGGSQGNLIF TRAV17  TRAJ42
+CAVDNYGQNFVF    TRAV21  TRAJ26
+CAASSTYDMRF TRAV13-1    TRAJ43
+CIVRSHSGSARQLTF TRAV26-1    TRAJ22
+
+```
+
+I have used the following on the breastcancer TME dataset from Azizi_Peer [paper](https://pubmed.ncbi.nlm.nih.gov/29961579/), which is the same code above with awk, except that I used the filtered contig file
+
+
+Here's the structure of the all_contig files output from 10x CellRanger VDJ experiments for TCR
+
+```
+
+anaferreira@Anas-MacBook-Pro:~/Desktop/GLIPH
+$ csvcut -n VDJ_Tcell_outfiles_190501_A00561_0026_BH7TTGDRXX_VDJ_SampleT_outs_all_contig_annotations.csv
+  1: barcode
+  2: is_cell
+  3: contig_id
+  4: high_confidence
+  5: length
+  6: chain
+  7: v_gene
+  8: d_gene
+  9: j_gene
+ 10: c_gene
+ 11: full_length
+ 12: productive
+ 13: cdr3
+ 14: cdr3_nt
+ 15: reads
+ 16: umis
+ 17: raw_clonotype_id
+ 18: raw_consensus_id
+ 
+ ```
+
+```
+### subsetting breast cancer dataset using the filtered contigs file
+
+awk '{FS="," ; if($6=="TRB" &&  $13!="None") print $13"\t"$7"\t"$9}' BC11_TUMOR1_filtered_contig_annotations.csv  > BC11_TUMOR1_TRB_TCR.txt
+awk '{FS="," ; if($6=="TRA" &&  $13!="None") print $13"\t"$7"\t"$9}' BC11_TUMOR1_filtered_contig_annotations.csv  > BC11_TUMOR1_TRA_TCR.txt
+
+#paste adds the TCRA files on the right side of the TCRB by a tab delim.
+
+paste -d '\t' BC11_TUMOR1_TRB_TCR.txt BC11_TUMOR1_TRA_TCR.txt > BC11_TUMOR1_TCR_TABLE
+
+```
+
+For running a test on ADAPTIVE data from Duhen's [paper](https://pubmed.ncbi.nlm.nih.gov/30006565/), I have used R instead of the command line. The files have different structures and there's only TCRB information
+
+Here's the code I used:
+
+```{r}
+library(tidyverse)
+
+setwd("")
+Mel1_SP_CD8_tumor <- read.table(file="~/Desktop/adaptive_Duhen_dataset/Original_files/Mel1_DN CD8_tumor.tsv", sep='\t', header = T)
+glimpse(Mel1_SP_CD8_tumor) # 113 variables (columns) and 755 cases
+
+#For the input for GLIPH, I'm interested in the following column names:
+# amino_acid == 50
+# v_gene
+# j_gene
+
+which(colnames(Mel1_SP_CD8_tumor)=="amino_acid") #50
+which(colnames(Mel1_SP_CD8_tumor)=="v_gene") #59
+which(colnames(Mel1_SP_CD8_tumor)=="j_gene") #65
+
+head(Mel1_SP_CD8_tumor[,50])
+head(Mel1_SP_CD8_tumor[,59])
+head(Mel1_SP_CD8_tumor[,65])
+
+
+Mel1_SP_CD8_tumor <- Mel1_SP_CD8_tumor[, c("amino_acid", "v_gene", "j_gene")]
+# change the column names for GLIPH (CDR3b, TRBV, TRBJ). File also had an extra count column... not sure why!
+
+dim(Mel1_SP_CD8_tumor) # we subsetted to 755 observations and 3 variables
+
+
+write.csv(Mel1_SP_CD8_tumor, file="Mel1_SP_CD8_tumor.csv")
+
+```
+
+# running GLIPH on table for DISCOVERY
+
+
+```
+./gliph-group-discovery.pl --tcr /Users/anaferreira/Desktop/GLIPH/gliph/mytcrtable.txt --refdb=/Users/anaferreira/Desktop/gliph/db/tcrab-naive-refdb-pseudovdjfasta.fa
+
+```
+
+Here's what the output of DISCOVERY looks like...
+
+```
+anaferreira@Anas-MacBook-Pro:~/Desktop/GLIPH/gliph/bin
+$ ls -lU
+total 8872
+-rwxr-xr-x@ 1 anaferreira  staff    30235 Apr 12  2017 gliph-group-discovery.pl
+-rwxr-xr-x@ 1 anaferreira  staff    19688 Nov 13  2016 gliph-group-scoring.pl
+
+-rw-r--r--  1 anaferreira  staff    55650 May 28 15:22 mytcrtable-clone-network.txt
+-rw-r--r--  1 anaferreira  staff    50018 May 28 15:22 mytcrtable-convergence-groups.txt
+-rw-r--r--  1 anaferreira  staff  3717804 May 28 15:04 mytcrtable-kmer_resample_1000_log.txt
+-rw-r--r--  1 anaferreira  staff      118 May 28 15:06 mytcrtable-kmer_resample_1000_minp0.001_ove10.txt
+-rw-r--r--  1 anaferreira  staff   153879 May 28 15:01 mytcrtable.txt
+```
+
+The clone-network.txt file can be used for network visualization with Cytoscape.
+
+
+
+# Running Cluster Scoring with GLIPH (need HLA information, even if it is HLA*)
+
+
+To score GLIPH clusters, run:
+
+```
+./gliph-group-scoring.pl --convergence_file TCR_TABLE-convergence-groups.txt \
+                         --clone_annotations TCR_TABLE \
+                         --p_depth=10000 \
+                         --hla_file HLA_TABLE \
+                         --motif_pval_file TCR_TABLE.minp.ove10.txt
+
+```
+
